@@ -54,7 +54,7 @@ address and password associated with your Simplenote account,
 SimplenoteSync will attempt to synchronize the information in both
 places.
 
-Sync information is stored in "simplenotesync.db". If this file is lost,
+Sync information is stored in ".simplenotesync.db". If this file is lost,
 SimplenoteSync will have to attempt to look for "collisions" between
 local files and existing notes. When performing the first
 synchronization, it's best to start with an empty local folder (or an
@@ -67,15 +67,20 @@ empty collection of notes on Simplenote), and then start adding files
 Please note that this software is still in development stages --- I
 STRONGLY urge you to backup all of your data before running to ensure
 nothing is lost. If you run SimplenoteSync on an empty local folder
-without a "simplenotesync.db" file, the net result will be to copy the
+without a ".simplenotesync.db" file, the net result will be to copy the
 remote notes to the local folder, effectively performing a backup.
 
 
 # Installation #
 
-Download the latest copy of SimplenoteSync.pl from github:
+Download the latest copy of SimplenoteSync from github:
 
 <http://github.com/fletcher/SimplenoteSync>
+
+The program can be installed by typing `make install` at a command prompt
+with root privileges.  The `SimplenoteSync` will be installed into
+`/usr/local/bin`.  If this is not desirable, then the Makefile should be
+modified to set the proper location.
 
 
 # Features #
@@ -173,7 +178,7 @@ error messages. Common problems so far include:
 
 * Not installing Crypt::SSLeay
 
-* Errors in the "simplenotesyncrc" file
+* Errors in the ".simplenotesyncrc" file
 
 Optionally, you can enable or disable writing changes to either the
 local directory or to the Simplenote web server. For example, if you

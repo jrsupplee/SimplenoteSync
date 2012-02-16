@@ -40,6 +40,7 @@ my $flag_network_traffic = 0;	# Print a warning for each network call
 
 GetOptions(
 	'help'					=>	sub { pod2usage( '-verbose' => 2, '-exitval' => 0 ); },
+	'man'					=>	sub { pod2usage( '-verbose' => 2, '-exitval' => 0 ); },
 	'debug'					=>	\$debug,
 	'show-network'			=>	\$flag_network_traffic,
 	'no-local-updates'		=>	\$allow_local_updates,
