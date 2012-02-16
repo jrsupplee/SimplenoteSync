@@ -1,11 +1,26 @@
 
 # Name #
 
-SimplenoteSync.pl --- synchronize a folder of text files with
+SimplenoteSync --- synchronize a folder of text files with
 Simplenote.
 
 Of note, this software is not created by or endorsed by Cloud Factory,
 the creators of Simplenote, or anyone else for that matter.
+
+
+# Description #
+
+After specifying a folder to store local text files, and the email
+address and password associated with your Simplenote account,
+SimplenoteSync will attempt to synchronize the information in both
+places.
+
+Sync information is stored in `.simplenotesync.db`. If this file is lost,
+SimplenoteSync will have to attempt to look for "collisions" between
+local files and existing notes. When performing the first
+synchronization, it's best to start with an empty local folder (or an
+empty collection of notes on Simplenote), and then start adding files
+(or notes) afterwards.
 
 
 # Configuration #
@@ -29,8 +44,10 @@ backup your data**
 **BACKUP YOUR DATA BEFORE USING --- THIS PROJECT IS STILL BEING TESTED.
 IF YOU AREN'T CONFIDENT IN WHAT YOU'RE DOING, DON'T USE IT!!!!**
 
-Create file in your home directory named ".simplenotesyncrc" with the
-following contents:
+Create file in your home directory configuration directory `.config` named
+`simplenotesyncrc` or if you prefer you can place the configuration directly
+in your home directory and name it `.simplenotesyncrc`.  It should follow
+the following format:
 
 1. First line is your email address
 
@@ -47,27 +64,12 @@ You can do this by running the following command as an administrator:
 	sudo perl -MCPAN -e "install Crypt::SSLeay"
 
 
-# Description #
-
-After specifying a folder to store local text files, and the email
-address and password associated with your Simplenote account,
-SimplenoteSync will attempt to synchronize the information in both
-places.
-
-Sync information is stored in ".simplenotesync.db". If this file is lost,
-SimplenoteSync will have to attempt to look for "collisions" between
-local files and existing notes. When performing the first
-synchronization, it's best to start with an empty local folder (or an
-empty collection of notes on Simplenote), and then start adding files
-(or notes) afterwards.
-
-
 # Warning #
 
 Please note that this software is still in development stages --- I
 STRONGLY urge you to backup all of your data before running to ensure
 nothing is lost. If you run SimplenoteSync on an empty local folder
-without a ".simplenotesync.db" file, the net result will be to copy the
+without a `.simplenotesync.db` file, the net result will be to copy the
 remote notes to the local folder, effectively performing a backup.
 
 
@@ -81,6 +83,13 @@ The program can be installed by typing `make install` at a command prompt
 with root privileges.  The `SimplenoteSync` will be installed into
 `/usr/local/bin`.  If this is not desirable, then the Makefile should be
 modified to set the proper location.
+
+
+# Program Execution #
+
+The program has several command line options that are described in the
+programs man page.  Command line help is available using the `--help`
+option.
 
 
 # Features #
@@ -112,7 +121,7 @@ changed locally and on the server simultaneously
 * Certain characters are prohibited in filenames (:,\,/) - if present in
 the title, they are stripped out.
 
-* If the simplenotesync.db file is lost, SimplenoteSync.pl is currently
+* If the `.simplenotesync.db` file is lost, `SimplenoteSync` is currently
 unable to realize that a text file and a note represent the same object
 --- instead you should move your local text files, do a fresh sync to
 download all notes locally, and manually replace any missing notes.
@@ -176,15 +185,16 @@ what gives?
 If SimplenoteSync isn't working, I've tried to add more (and better)
 error messages. Common problems so far include:
 
-* Not installing Crypt::SSLeay
+* `Crypt::SSLeay` is not installed
 
-* Errors in the ".simplenotesyncrc" file
+* Errors in the `simplenotesyncrc` file
 
 Optionally, you can enable or disable writing changes to either the
 local directory or to the Simplenote web server. For example, if you
 want to attempt to copy files to your computer without risking your
-remote data, you can disable "$allow_server_updates". Or, you can
-disable "$allow_local_updates" to protect your local data.
+remote data, you can disable server updates with the `--no-server-updates`
+option. Or, you can disable local updates using the `--no-local-updates` option
+to protect your local data.
 
 Additionally, there is a script "Debug.pl" that will generate a text
 file with some useful information to email to me if you continue to have
