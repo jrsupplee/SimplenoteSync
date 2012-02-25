@@ -97,6 +97,9 @@ my $url = 'https://simple-note.appspot.com/api/';
 my $token;
 
 my $logfile = "$sync_directory/simplenotesync.log";
+my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time());
+logIt( "----------" );
+logIt( sprintf('%04u-%02u-%02u %02u:%02u:%02u', $year+1900, $mon+1, $mday, $hour, $min, $sec) . " Syncing SimpleNotes account $email with $sync_directory" );
 
 # On which OS are we running?
 my $os = $^O;	# Mac = darwin; Linux = linux; Windows contains MSWin
@@ -141,7 +144,7 @@ sub getToken {
 		die "Problem connecting to web server.\nHave you installed Crypt:SSLeay as instructed?\n";
 	}
 
-	die "Error logging into Simplenote server:\n$response->content\n" unless $response->is_success;
+	die "Error logging into Simplenote server:\n" . $response->content . "\n" unless $response->is_success;
 
 	return $response->content;
 }
