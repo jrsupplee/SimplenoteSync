@@ -223,23 +223,26 @@ sub uploadFileToNote {
 	my $filepath = shift;
 	my $key = shift;		# Supply key if we are updating existing note
 
+	return 0 if (!$allow_server_updates);
+
 	my $title = filenameToTitle($filepath);		# The title for new note
 
 	my $content = "\n";							# The content for new note
 	open (INPUT, '<', "$filepath");
+	binmode INPUT, ":utf8";
 	local $/;
 	$content .= <INPUT>;
 	close(INPUT);
 
 	# Check to make sure text file is encoded as UTF-8
-	if (eval { decode_utf8($content, Encode::FB_CROAK); 1 }) {
+	#if (eval { decode_utf8($content, Encode::FB_CROAK); 1 }) {
 		# $content is valid utf8
-	} else {
+	#} else {
 		# $content is not valid utf8 - assume it's macroman and convert
-		logIt( "$filepath is not a UTF-8 file. Will try to convert" );
-		$content = decode('MacRoman', $content);
-		utf8::encode($content);
-	}
+	#	logIt( "\t$filepath is not a UTF-8 file. Will try to convert" );
+	#	$content = decode('MacRoman', $content);
+	#	utf8::encode($content);
+	#}
 
 	my @d = gmtime ((stat("$filepath"))[9]);	# get file's modification time
 	my $modified = sprintf "%4d-%02d-%02d %02d:%02d:%02d", $d[5]+1900,$d[4]+1,$d[3],$d[2],$d[1],$d[0];
@@ -259,22 +262,28 @@ sub uploadFileToNote {
 
 		my $modifyString = $modified ? "&modify=$modified" : "";
 
-		logIt( "Network: update existing note \"$title\"" ) if $flag_network_traffic;
-		my $response = $ua->post($url . "note?key=$key&auth=$token&email=$email$modifyString", Content => encode_base64($title ."\n" . $content)) if ($allow_server_updates);
+		logIt( "\tNetwork: update existing note \"$title\"" ) if $flag_network_traffic;
+		my $response = $ua->post($url . "note?key=$key&auth=$token&email=$email$modifyString", Content => encode_base64($title ."\n" . $content));
+
+		if ($response->code < 200 && $response->code > 203) {
+			logIt("\tError uploading.  HTTP response " . $response->code . " " . $response->message);
+		}
+
 	} else {
 		# We are creating a new note
 
 		my $modifyString = $modified ? "&modify=$modified" : "";
 		my $createString = $created ? "&create=$created" : "";
 
-		logIt( "Network: create new note \"$title\"" ) if $flag_network_traffic;
-		my $response = $ua->post($url . "note?auth=$token&email=$email$modifyString$createString", Content => encode_base64($title ."\n" . $content)) if ($allow_server_updates);
+		logIt( "\tNetwork: create new note \"$title\"" ) if $flag_network_traffic;
+		my $response = $ua->post($url . "note?auth=$token&email=$email$modifyString$createString", Content => encode_base64($title ."\n" . $content));
 
 		# Return the key of the newly created note
-		if ($allow_server_updates) {
-			$key = $response->content;
-		} else {
+		if ($response->code < 200 && $response->code > 203) {
+			logIt("\tError uploading.  HTTP response " . $response->code . " " . $response->message);
 			$key = 0;
+		} else {
+			$key = $response->content;
 		}
 	}
 
@@ -303,13 +312,13 @@ sub downloadNoteToFile {
 
 	# retrieve note
 
-	logIt( "Network: retrieve existing note \"$key\"" ) if $flag_network_traffic;
+	logIt( "\tNetwork: retrieve existing note \"$key\"" ) if $flag_network_traffic;
 	my $response = $ua->get($url . "note?key=$key&auth=$token&email=$email&encode=base64");
 	my $content = decode_base64($response->content);
 
 	if ($content eq "") {
 		# No such note exists any longer
-		logIt( "$key no longer exists on server", 1 );
+		logIt( "\tError: $key no longer exists on server", 1 );
 		$deletedFromDatabase{$key} = 1;
 		return;
 	}
@@ -341,7 +350,7 @@ sub downloadNoteToFile {
 				File::Path::rmtree("$storage_directory/$filename");
 			}
 		} else {
-			logIt( "note $key was flagged for deletion on server - not downloaded" );
+			logIt( "\tnote $key was flagged for deletion on server - not downloaded" );
 			# Optionally, could add "&dead=1" to force Simplenote to remove
 			#	this note from the database. Could cause problems on iPhone
 			#	Just for future reference....
@@ -368,7 +377,7 @@ sub downloadNoteToFile {
 		($overwrite == 0)) {
 		# A file already exists with that name, and we're not intentionally
 		#	replacing with a new copy.
-		logIt( "$filename already exists. Will not download.", 1);
+		logIt( "\t$filename already exists. Will not download.", 1);
 
 		return "";
 	} else {
