@@ -32,6 +32,8 @@ use Getopt::Long;
 use Config::IniFiles;
 
 
+my $storage_subdir = ".storage";
+
 # Options
 my $debug = 0;					# enable log messages for troubleshooting
 my $allow_local_updates = 1;	# Allow changes to local text files
@@ -325,7 +327,7 @@ sub uploadFileToNote {
 
 	if (($store_base_text) && ($allow_local_updates)) {
 		# Put a copy of note in storage
-		my $copy = dirname($filepath) . "/SimplenoteSync Storage/" . basename($filepath);
+		my $copy = dirname($filepath) . "/$storage_subdir/" . basename($filepath);
 		copy($filepath,$copy);
 	}
 
@@ -338,7 +340,6 @@ sub downloadNoteToFile {
 	my $key = shift;
 	my $directory = shift;
 	my $overwrite = shift;
-	my $storage_directory = "$directory/SimplenoteSync Storage";
 
 	# retrieve note
 
@@ -358,6 +359,7 @@ sub downloadNoteToFile {
 	$content =~ s/^(.*?)(\n{1,2}|\Z)//s;		# First line is title
 	my $title = $1;
 	my $divider = $2;
+	my $storage_directory = "$directory/$storage_subdir";
 
 	# If first line is particularly long, it will get trimmed, so
 	# leave it in body, and make a short version for the title
@@ -486,7 +488,7 @@ sub synchronizeNotesToFolder {
 		die "Destination directory \"$directory\" does not exist\n";
 	}
 
-	my $storage_directory = "$directory/SimplenoteSync Storage";
+	my $storage_directory = "$directory/$storage_subdir";
 	if ((! -e $storage_directory) && $store_base_text) {
 		# This directory saves a copy of the text at each successful sync
 		#	to allow three way merging
@@ -784,7 +786,7 @@ show network debugging information
 =item B<--store-base>
 
 backup files in a subdirectory of your local sync directory called
-C<SimplenoteSync Storage>.
+C<.storage>.
 
 =back
 
