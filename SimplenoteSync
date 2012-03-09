@@ -29,6 +29,7 @@ use Encode;
 
 use Pod::Usage;
 use Getopt::Long;
+use Config::IniFiles;
 
 
 # Options
@@ -48,58 +49,23 @@ GetOptions(
 	'store-base!'			=>	\$store_base_text,
 ) || pod2usage( '-message' => 'invalid option', '-exitval' => 2 );
 
-# Configuration
-#
-# Create file in your home directory named ".simplenotesyncrc"
-# First line is your email address
-# Second line is your Simplenote password
-# Third line is the directory to be used for text files
-# Fourth line is the filename suffix to be appended to files
 
-if (!open (CONFIG, '<', "$ENV{HOME}/.config/simplenotesyncrc")) {
-	open (CONFIG, '<', "$ENV{HOME}/.simplenotesyncrc") or die "Unable to load config file $ENV{HOME}/.config/simplenotesyncrc.\n";
-}
+my $config = load_config();
 
-my $email = <CONFIG>;
-my $password = <CONFIG>;
-my $rc_directory = <CONFIG>;
-my $file_extension = <CONFIG>;
 my $sync_directory;
 
 
-if (! defined ($file_extension)) {
-	$file_extension = "txt";
-}
-
-close CONFIG;
-chomp ($email, $password, $rc_directory, $file_extension);
-
-if ($rc_directory eq "") {
+if (!($sync_directory = abs_path($config->{rc_directory}))) {
 	# If a valid directory isn't specified, then don't keep going
-	die "A directory was not specified.\n";
+	die "\"${$config}{rc_directory}\" does not appear to be a valid directory.\n";
 };
-
-$rc_directory =~ s/\\ / /g;
-
-if ($sync_directory = abs_path($rc_directory)) {
-} else {
-	# If a valid directory isn't specified, then don't keep going
-	die "\"$rc_directory\" does not appear to be a valid directory.\n";
-};
-
-$file_extension =~ s/^\s*\.(.*?)\s*$/$1/;
-
-if ($file_extension =~ /^\s*$/) {
-	$file_extension = "txt";
-}
 
 my $url = 'https://simple-note.appspot.com/api/';
 my $token;
 
 my $logfile = "$sync_directory/simplenotesync.log";
-my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time());
-logIt( "----------" );
-logIt( sprintf('%04u-%02u-%02u %02u:%02u:%02u', $year+1900, $mon+1, $mday, $hour, $min, $sec) . " Syncing SimpleNotes account $email with $sync_directory" );
+logIt( "--------------------" );
+logIt( formatDate( localtime(time()) ). " syncing account ${$config}{email} with $sync_directory" );
 
 # On which OS are we running?
 my $os = $^O;	# Mac = darwin; Linux = linux; Windows contains MSWin
@@ -132,16 +98,70 @@ writeSyncDatabase($sync_directory);
 1;
 
 
+sub load_config {
+	# Configuration
+	#
+	# Create file in your home directory named ".simplenotesyncrc"
+	# First line is your email address
+	# Second line is your Simplenote password
+	# Third line is the directory to be used for text files
+	# Fourth line is the filename suffix to be appended to files
+
+	my $config = {};
+
+	my $ini_file = "$ENV{HOME}/.config/simplenotesync.ini";
+	if (-f "$ini_file") {
+		my $ini = new Config::IniFiles( '-file' => $ini_file, '-nocase' => 1 );
+
+		$config->{email} = $ini->val('Remote', 'Email');
+		$config->{password} = $ini->val('Remote', 'Password');
+
+		$config->{rc_directory} = $ini->val('Local', 'Notes Path');
+		$config->{file_extension} = $ini->val('Local', 'File Extension');
+
+	} else {
+		if (!open (CONFIG, '<', "$ENV{HOME}/.config/simplenotesyncrc")) {
+			open (CONFIG, '<', "$ENV{HOME}/.simplenotesyncrc") or die "Unable to load config file $ENV{HOME}/.config/simplenotesyncrc.\n";
+		}
+
+		$config->{email} = <CONFIG>;
+		$config->{password} = <CONFIG>;
+		$config->{rc_directory} = <CONFIG>;
+		$config->{file_extension} = <CONFIG>;
+
+		close CONFIG;
+
+		chomp ($config->{email}, $config->{password}, $config->{rc_directory}, $config->{file_extension});
+
+	}
+
+	$config->{file_extension} =~ s/^\s*\.*(\S*?)\s*$/$1/;
+
+	if (! defined ($config->{file_extension})) {
+		$config->{file_extension} = "txt";
+	}
+
+	if (!$config->{rc_directory}) {
+		# If a valid directory isn't specified, then don't keep going
+		die "No notes local sync directory was not specified.\n";
+	};
+
+	$config->{rc_directory} =~ s/\\ / /g;
+
+	return $config;
+}
+
+
 sub getToken {
 	# Connect to server and get a authentication token
 
-	my $content = encode_base64("email=$email&password=$password");
+	my $content = encode_base64("email=${$config}{email}&password=${$config}{password}");
 
 	logIt( "Network: get token" ) if $flag_network_traffic;
-	my $response =  $ua->post($url . "login", Content => $content);
+	my $response = $ua->post($url . "login", Content => $content);
 
 	if ($response->content =~ /Invalid argument/) {
-		die "Problem connecting to web server.\nHave you installed Crypt:SSLeay as instructed?\n";
+		die "Problem connecting to web server.\nCheck that Crypt:SSLeay PERL module is installed.\n";
 	}
 
 	die "Error logging into Simplenote server:\n" . $response->content . "\n" unless $response->is_success;
@@ -155,7 +175,7 @@ sub getNoteIndex {
 	my %note = ();
 
 	logIt( "Network: get note index" ) if $flag_network_traffic;
-	my $response = $ua->get($url . "index?auth=$token&email=$email");
+	my $response = $ua->get($url . "index?auth=$token&email=${$config}{email}");
 	my $index = $response->content;
 
 	$index =~ s{
@@ -182,6 +202,13 @@ sub getNoteIndex {
 }
 
 
+sub formatDate {
+	my (@d) = @_;
+
+	return sprintf "%4d-%02d-%02d %02d:%02d:%02d", $d[5]+1900,$d[4]+1,$d[3],$d[2],$d[1],$d[0];
+}
+
+
 sub titleToFilename {
 	# Convert note's title into valid filename
 	my $title = shift;
@@ -189,7 +216,7 @@ sub titleToFilename {
 	# Strip prohibited characters
 	$title =~ s/[:\\\/]/ /g;
 
-	$title .= ".$file_extension";
+	$title .= ".${$config}{file_extension}";
 
 	return $title;
 }
@@ -200,6 +227,7 @@ sub filenameToTitle {
 	my $filename = shift;
 
 	$filename = basename ($filename);
+	my $file_extension = $config->{file_extension};
 	$filename =~ s/\.$file_extension$//;
 
 	return $filename;
@@ -265,7 +293,7 @@ sub uploadFileToNote {
 		my $modifyString = $modified ? "&modify=$modified" : "";
 
 		logIt( "\tNetwork: update existing note \"$title\"" ) if $flag_network_traffic;
-		my $response = $ua->post($url . "note?key=$key&auth=$token&email=$email$modifyString", Content => encode_base64($title ."\n" . $content));
+		my $response = $ua->post($url . "note?key=$key&auth=$token&email=${$config}{email}$modifyString", Content => encode_base64($title ."\n" . $content));
 
 		if ($response->code < 200 && $response->code > 203) {
 			logIt("\tError uploading.  HTTP response " . $response->code . " " . $response->message);
@@ -278,7 +306,7 @@ sub uploadFileToNote {
 		my $createString = $created ? "&create=$created" : "";
 
 		logIt( "\tNetwork: create new note \"$title\"" ) if $flag_network_traffic;
-		my $response = $ua->post($url . "note?auth=$token&email=$email$modifyString$createString", Content => encode_base64($title ."\n" . $content));
+		my $response = $ua->post($url . "note?auth=$token&email=${$config}{email}$modifyString$createString", Content => encode_base64($title ."\n" . $content));
 
 		# Return the key of the newly created note
 		if ($response->code < 200 && $response->code > 203) {
@@ -315,7 +343,8 @@ sub downloadNoteToFile {
 	# retrieve note
 
 	logIt( "\tNetwork: retrieve existing note \"$key\"" ) if $flag_network_traffic;
-	my $response = $ua->get($url . "note?key=$key&auth=$token&email=$email&encode=base64");
+	my $u = $url . "note?key=$key&auth=$token&email=" . $config->{email} . "&encode=base64";
+	my $response = $ua->get($u);
 	my $content = decode_base64($response->content);
 
 	if ($content eq "") {
@@ -430,7 +459,7 @@ sub deleteNoteOnline {
 
 	if ($allow_server_updates) {
 		logIt( "Network: delete note \"$key\"" ) if $flag_network_traffic;
-		my $response = $ua->get($url . "delete?key=$key&auth=$token&email=$email");
+		my $response = $ua->get($url . "delete?key=$key&auth=$token&email=${$config}{email}");
 		return $response->content;
 	} else {
 		return "";
@@ -474,7 +503,7 @@ sub synchronizeNotesToFolder {
 	my $glob_directory = $directory;
 	$glob_directory =~ s/ /\\ /g;
 
-	foreach my $filepath (glob("$glob_directory/*.$file_extension")) {
+	foreach my $filepath (glob("$glob_directory/*.${$config}{file_extension}")) {
 		$filepath = abs_path($filepath);
 		my @d=gmtime ((stat("$filepath"))[9]);
 		$file{$filepath}{modify} = sprintf "%4d-%02d-%02d %02d:%02d:%02d", $d[5]+1900,$d[4]+1,$d[3],$d[2],$d[1],$d[0];
