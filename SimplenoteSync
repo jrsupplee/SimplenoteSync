@@ -230,19 +230,21 @@ sub uploadFileToNote {
 	my $content = "\n";							# The content for new note
 	open (INPUT, '<', "$filepath");
 	binmode INPUT, ":utf8";
-	local $/;
-	$content .= <INPUT>;
+	#local $/;
+	my $buffer;
+	my $result;
+	while ($result = read(INPUT, $buffer, 4096)) {
+		$content .= $buffer;
+	}
+
 	close(INPUT);
 
 	# Check to make sure text file is encoded as UTF-8
-	#if (eval { decode_utf8($content, Encode::FB_CROAK); 1 }) {
-		# $content is valid utf8
-	#} else {
+	if (!Encode::is_utf8($content, 1)) {
 		# $content is not valid utf8 - assume it's macroman and convert
-	#	logIt( "\t$filepath is not a UTF-8 file. Will try to convert" );
-	#	$content = decode('MacRoman', $content);
-	#	utf8::encode($content);
-	#}
+		logIt( "\tFile is not encoded in UTF-8.  It must be converted before it can be uploaded." );
+		return 0;
+	}
 
 	my @d = gmtime ((stat("$filepath"))[9]);	# get file's modification time
 	my $modified = sprintf "%4d-%02d-%02d %02d:%02d:%02d", $d[5]+1900,$d[4]+1,$d[3],$d[2],$d[1],$d[0];
