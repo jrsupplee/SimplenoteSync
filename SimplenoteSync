@@ -277,17 +277,21 @@ sub uploadFileToNote {
 	}
 
 	my @d = gmtime ((stat("$filepath"))[9]);	# get file's modification time
-	my $modified = sprintf "%4d-%02d-%02d %02d:%02d:%02d", $d[5]+1900,$d[4]+1,$d[3],$d[2],$d[1],$d[0];
+	my $modified = formatDate( @d );
 
+	my $btime;
 	if ($os =~ /darwin/i) {
 		# The following works on Mac OS X - need a "birth time", not ctime
-		@d = gmtime (readpipe ("stat -f \"%B\" \"$filepath\""));	# created time
+		$btime = readpipe("stat -f \"\%B\" \"$filepath\"");	# created time
 	} else {
-		# TODO: Need a better way to do this on non Mac systems
-		@d = gmtime ((stat("$filepath"))[9]);	# get file's modification time
+		$btime = readpipe('stat -c "%W" "' . $filepath. '"');	# created time
+		if (!$btime) {
+			$btime = (stat("$filepath"))[9];	# if btime doesn't work settle for file's modification time
+		}
 	}
+	@d = gmtime($btime);
 
-	my $created = sprintf "%4d-%02d-%02d %02d:%02d:%02d", $d[5]+1900,$d[4]+1,$d[3],$d[2],$d[1],$d[0];
+	my $created = formatDate( @d );
 
 	if (defined($key)) {
 		# We are updating an old note
@@ -455,6 +459,7 @@ sub trimTitle {
 	return $title;
 }
 
+
 sub deleteNoteOnline {
 	# Delete specified note from Simplenote server
 	my $key = shift;
@@ -532,41 +537,43 @@ sub synchronizeNotesToFolder {
 
 		if (defined ($file{"$directory/$filename"})) {
 			# the current item appears to exist as a local file
-			logIt( "$filename exists" );
+			logIt( "$filename:" );
 			if ($file{"$directory/$filename"}{modify} eq $last_mod_date) {
 				# file appears unchanged
-				logIt( "\tlocal copy unchanged" );
+				logIt( "\tlocal: unchanged" );
 
 				if (defined ($note{$key}{modify})) {
 					# Remote copy also exists
-					logIt( "\tremote copy exists" );
 
 					if ($note{$key}{modify} eq $last_mod_date) {
 						# note on server also appears unchanged
+						logIt( "\tremote: unchanged" );
 
 						# Nothing more to do
 					} else {
 						# note on server has changed, but local file hasn't
-						logIt( "\tremote file is changed" );
+						logIt( "\tremote: changed" );
 
 						if ($note{$key}{deleted} eq "true") {
 							# Remote note was flagged for deletion
-							logIt( "Deleting $filename as it was deleted on server", 1 );
+							logIt( "\tremote: deleted" );
 							if ($allow_local_updates) {
 								File::Path::rmtree("$directory/$filename");
 								delete($file{"$directory/$filename"});
+								logIt( "\tlocal: deleted" );
 							}
 						} else {
 							# Remote note not flagged for deletion
 							# update local file and overwrite if necessary
 							my $newFile = downloadNoteToFile($key,$directory,1);
+							logIt( "\tlocal: downloaded from remote" );
 
 							if (($newFile ne $filename) && ($newFile ne "")) {
-								logIt( "Deleting $filename as it was renamed to $newFile", );
 								# The file was renamed on server; delete old copy
 								if ($allow_local_updates) {
 									File::Path::rmtree("$directory/$filename");
 									delete($file{"$directory/$filename"});
+									logIt( "\tlocal: renamed to $newFile" );
 								}
 							}
 						}
@@ -585,11 +592,11 @@ sub synchronizeNotesToFolder {
 				}
 			} else {
 				# local file appears changed
-				logIt( "\tlocal file has changed" );
+				logIt( "\tlocal: changed" );
 
 				if ($note{$key}{modify} eq $last_mod_date) {
 					# but note on server is old
-					logIt( "\tbut server copy is unchanged" );
+					logIt( "\tremote: unchanged" );
 
 					# update note on server
 					uploadFileToNote("$directory/$filename",$key);
@@ -598,8 +605,11 @@ sub synchronizeNotesToFolder {
 					delete($note{$key});
 					delete($file{"$directory/$filename"});
 				} else {
+					logIt( "\tremote: changed" );
 					# note on server has also changed
-					logIt( "$filename was modified locally and on server - please check file for conflicts.", 1 );
+					logIt( "\tchanges merged - please check file for conflicts." );
+
+					warn( "$filename changed locally and on remote server." );
 
 					# Use the stored copy from last sync to enable a three way
 					#	merge, then use this as the official copy and allow
