@@ -285,7 +285,7 @@ sub uploadFileToNote {
 		$btime = readpipe("stat -f \"\%B\" \"$filepath\"");	# created time
 	} else {
 		$btime = readpipe('stat -c "%W" "' . $filepath. '"');	# created time
-		if (!$btime) {
+		if (!$btime || $btime eq '?') {
 			$btime = (stat("$filepath"))[9];	# if btime doesn't work settle for file's modification time
 		}
 	}
