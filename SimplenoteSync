@@ -13,6 +13,118 @@
 # TODO: Windows compatibility?? This has not been tested AT ALL yet
 # TODO: Further testing on Linux - mainly file creation time
 
+package SimpleNote::Note;
+
+my $data = {};
+
+1;
+
+sub new {
+	my $class = shift;
+
+	my ($note) = @_;
+
+	my $self = bless {}, $class;
+	
+	foreach my $key ('key', 'title', 'content', 'modified', 'created', 'deleted') {
+		if (defined $note->{$key}) {
+			$self->{$key} = $note->{$key};
+		}
+	}
+	
+	return $self;
+}
+
+
+sub content {
+	my ($self, $value) = @_;
+	
+	if (defined $value) {
+		$self->{content} = $value;
+	}
+	
+	return $self->{content};
+}
+
+
+sub hasContent {
+	my ($self) = @_;
+	
+	return defined $self->{content} && $self->{content};
+}
+
+
+sub title {
+	my ($self, $value) = @_;
+	
+	if (defined $value) {
+		$self->{title} = $value;
+	}
+	
+	return $self->{title};
+}
+
+
+sub modified {
+	my ($self, $value) = @_;
+	
+	if (defined $value) {
+		$value =~ s/\..*$//;
+		$self->{modified} = $value;
+	}
+	
+	return $self->{modified};
+}
+
+
+sub modified_utime {
+	my ($self) = @_;
+
+	if ($self->modified =~ /(\d\d\d\d)-(\d\d)-(\d\d)\s*(\d\d):(\d\d):(\d\d)/) {
+		return timegm($6,$5,$4,$3,$2-1,$1);
+	}
+	
+	return undef;
+}
+
+
+sub created {
+	my ($self, $value) = @_;
+	
+	if (defined $value) {
+		$value =~ s/\..*$//;
+		$self->{created} = $value;
+	}
+	
+	return $self->{created};
+}
+
+
+sub created_utime {
+	my ($self) = @_;
+
+	if ($self->created =~ /(\d\d\d\d)-(\d\d)-(\d\d)\s*(\d\d):(\d\d):(\d\d)/) {
+		return timegm($6,$5,$4,$3,$2-1,$1);
+	}
+	
+	return undef;
+}
+
+
+sub deleted {
+	my ($self, $value) = @_;
+	
+	if (defined $value) {
+		$self->{deleted} = $value;
+	}
+	
+	return $self->{deleted};
+}
+
+
+
+package main;
+
 use strict;
 use warnings;
 use File::Basename;
@@ -26,6 +138,7 @@ use Time::Local;
 use File::Copy;
 use Encode 'decode_utf8';
 use Encode;
+use JSON;
 
 use Pod::Usage;
 use Getopt::Long;
@@ -86,7 +199,7 @@ my %deletedFromDatabase = ();
 
 
 # Get authorization token
-$token = getToken();
+$token = apiGetAuthToken($config->{email}, $config->{password});
 
 
 # Do Synchronization
@@ -154,10 +267,12 @@ sub load_config {
 }
 
 
-sub getToken {
-	# Connect to server and get a authentication token
+sub apiGetAuthToken {
+	# Connect to server and get an authentication token
 
-	my $content = encode_base64("email=${$config}{email}&password=${$config}{password}");
+	my ($email, $pass) = @_;
+	
+	my $content = encode_base64("email=${email}&password=${pass}");
 
 	logIt( "Network: get token" ) if $flag_network_traffic;
 	my $response = $ua->post($url . "login", Content => $content);
@@ -168,39 +283,23 @@ sub getToken {
 
 	die "Error logging into Simplenote server:\n" . $response->content . "\n" unless $response->is_success;
 
-	return $response->content;
+	return {
+		email		=>	$email,
+		password	=>	$pass,
+		token		=>	$response->content,
+	};
 }
 
 
-sub getNoteIndex {
+sub apiGetNoteIndex {
 	# Get list of notes from simplenote server
-	my %note = ();
-
+	my $token = shift;
+	
 	logIt( "Network: get note index" ) if $flag_network_traffic;
-	my $response = $ua->get($url . "index?auth=$token&email=${$config}{email}");
-	my $index = $response->content;
+	my $response = $ua->get($url . "index?auth=${$token}{token}&email=${$token}{email}");
+	my %index = map { $_->{key} => $_ } @{decode_json( $response->content )};
 
-	$index =~ s{
-		\{(.*?)\}
-	}{
-		# iterate through notes in index and load into hash
-		my $notedata = $1;
-
-		$notedata =~ /"key":\s*"(.*?)"/;
-		my $key = $1;
-
-		while ($notedata =~ /"(.*?)":\s*"?(.*?)"?(,|\Z)/g) {
-			# load note data into hash
-			if ($1 ne "key") {
-				$note{$key}{$1} = $2;
-			}
-		}
-
-		# Trim fractions of seconds from modification time
-		$note{$key}{modify} =~ s/\..*$//;
-	}egx;
-
-	return \%note;
+	return \%index;
 }
 
 
@@ -248,6 +347,20 @@ sub logIt {
 }
 
 
+sub apiPutNote {
+	my ($token, $note) = @_;
+	
+	my $response = $ua->post(
+		sprintf($url . 'note?key=%s&auth=%s&email=%s&modify=%s', $note->key, $token->{token}, $token->{email}, $note->modified),
+		Content => encode_base64(encode("UTF-8", $note->{title} ."\n" . $note->{content}))
+	);
+
+	if ($response->code < 200 || $response->code > 203) {
+		logIt("\tError uploading.  HTTP response " . $response->code . " " . $response->message);
+	}
+}
+
+
 sub uploadFileToNote {
 	# Given a local file, upload it as a note at simplenote web server
 	my $filepath = shift;
@@ -282,9 +395,10 @@ sub uploadFileToNote {
 	my $btime;
 	if ($os =~ /darwin/i) {
 		# The following works on Mac OS X - need a "birth time", not ctime
-		$btime = readpipe("stat -f \"\%B\" \"$filepath\"");	# created time
+		$btime =x readpipe("stat -f \"\%B\" \"$filepath\"");	# created time
 	} else {
 		$btime = readpipe('stat -c "%W" "' . $filepath. '"');	# created time
+		chomp $btime;
 		if (!$btime || $btime eq '?') {
 			$btime = (stat("$filepath"))[9];	# if btime doesn't work settle for file's modification time
 		}
@@ -299,7 +413,7 @@ sub uploadFileToNote {
 		my $modifyString = $modified ? "&modify=$modified" : "";
 
 		logIt( "\tNetwork: update existing note \"$title\"" ) if $flag_network_traffic;
-		my $response = $ua->post($url . "note?key=$key&auth=$token&email=${$config}{email}$modifyString", Content => encode_base64($title ."\n" . $content));
+		my $response = $ua->post($url . "note?key=$key&auth=$token&email=${$config}{email}$modifyString", Content => encode_base64(encode("UTF-8", $title ."\n" . $content)));
 
 		if ($response->code < 200 && $response->code > 203) {
 			logIt("\tError uploading.  HTTP response " . $response->code . " " . $response->message);
@@ -312,7 +426,7 @@ sub uploadFileToNote {
 		my $createString = $created ? "&create=$created" : "";
 
 		logIt( "\tNetwork: create new note \"$title\"" ) if $flag_network_traffic;
-		my $response = $ua->post($url . "note?auth=$token&email=${$config}{email}$modifyString$createString", Content => encode_base64($title ."\n" . $content));
+		my $response = $ua->post($url . "note?auth=$token&email=${$config}{email}$modifyString$createString", Content => encode_base64(encode("UTF-8", $title ."\n" . $content)));
 
 		# Return the key of the newly created note
 		if ($response->code < 200 && $response->code > 203) {
@@ -339,44 +453,87 @@ sub uploadFileToNote {
 }
 
 
+sub apiGetNote {
+	# Save local copy of note from Simplenote server
+	
+	my $token = shift;
+	my $key = shift;
+
+	# retrieve note
+
+	logIt( "\tNetwork: retrieve existing note \"$key\"" ) if $flag_network_traffic;
+	my $u = sprintf($url . 'note?key=%s&auth=%s&email=%s&encode=base64', $key, $token->{token}, $token->{email} );
+	my $response = $ua->get($u);
+	my $content = decode_base64(decode("UTF-8", $response->content));
+	my $title;
+	
+	if ($content ne "") {
+		# Parse into title and content (if present)
+		$content =~ s/^(.*?)(\n{1,2}|\Z)//s;		# First line is title
+		$title = $1;
+		my $divider = $2;
+	
+		# If first line is particularly long, it will get trimmed, so
+		# leave it in body, and make a short version for the title
+		if (length($title) > 240) {
+			# Restore first line to content and create new title
+			$content = $title . $divider . $content;
+			$title = trimTitle($title);
+		}
+	}
+	
+	# If note is marked for deletion on the server, don't download
+	my $deleted = ($response->header('note-deleted') eq "True" );
+
+	# Get time of note creation (trim fractions of seconds)
+	my $create = my $createString = $response->header('note-createdate');
+	$create =~ /(\d\d\d\d)-(\d\d)-(\d\d)\s*(\d\d):(\d\d):(\d\d)/;
+	$create = timegm($6,$5,$4,$3,$2-1,$1);
+	$createString =~ s/\..*$//;
+
+	# Get time of note modification (trim fractions of seconds)
+	my $modify = my $modifyString = $response->header('note-modifydate');
+	$modify =~ /(\d\d\d\d)-(\d\d)-(\d\d)\s*(\d\d):(\d\d):(\d\d)/;
+	$modify = timegm($6,$5,$4,$3,$2-1,$1);
+	$modifyString =~ s/\..*$//;
+
+	return {
+			key				=>	$key,
+			found			=>	($content ne ""),
+			deleted			=>	$deleted,
+			modify			=>	$modify,
+			modifyString	=>	$modifyString,
+			create			=>	$create,
+			createString	=>	$createString,
+			title			=>	$title,
+			content			=>	$content
+		};
+}
+
+
 sub downloadNoteToFile {
 	# Save local copy of note from Simplenote server
 	my $key = shift;
 	my $directory = shift;
 	my $overwrite = shift;
-
+	
 	# retrieve note
 
-	logIt( "\tNetwork: retrieve existing note \"$key\"" ) if $flag_network_traffic;
-	my $u = $url . "note?key=$key&auth=$token&email=" . $config->{email} . "&encode=base64";
-	my $response = $ua->get($u);
-	my $content = decode_base64($response->content);
+	my $note = apiGetNote( $token, $key );
 
-	if ($content eq "") {
+	if (!$note->{found}) {
 		# No such note exists any longer
 		logIt( "\tError: $key no longer exists on server", 1 );
 		$deletedFromDatabase{$key} = 1;
 		return;
 	}
 
-	# Parse into title and content (if present)
-	$content =~ s/^(.*?)(\n{1,2}|\Z)//s;		# First line is title
-	my $title = $1;
-	my $divider = $2;
 	my $storage_directory = "$directory/$storage_subdir";
 
-	# If first line is particularly long, it will get trimmed, so
-	# leave it in body, and make a short version for the title
-	if (length($title) > 240) {
-		# Restore first line to content and create new title
-		$content = $title . $divider . $content;
-		$title = trimTitle($title);
-	}
-
-	my $filename = titleToFilename($title);
+	my $filename = titleToFilename($note->{title});
 
 	# If note is marked for deletion on the server, don't download
-	if ($response->header('note-deleted') eq "True" ) {
+	if ($note->{deleted}) {
 		if (($overwrite == 1) && ($allow_local_updates)) {
 			# If we're in overwrite mode, then delete local copy
 			File::Path::rmtree("$directory/$filename");
@@ -396,49 +553,55 @@ sub downloadNoteToFile {
 		return "";
 	}
 
-	# Get time of note creation (trim fractions of seconds)
-	my $create = my $createString = $response->header('note-createdate');
-	$create =~ /(\d\d\d\d)-(\d\d)-(\d\d)\s*(\d\d):(\d\d):(\d\d)/;
-	$create = timegm($6,$5,$4,$3,$2-1,$1);
-	$createString =~ s/\..*$//;
-
-	# Get time of note modification (trim fractions of seconds)
-	my $modify = my $modifyString = $response->header('note-modifydate');
-	$modify =~ /(\d\d\d\d)-(\d\d)-(\d\d)\s*(\d\d):(\d\d):(\d\d)/;
-	$modify = timegm($6,$5,$4,$3,$2-1,$1);
-	$modifyString =~ s/\..*$//;
-
 	# Create new file
 
 	if ((-f "$directory/$filename")  &&
 		($overwrite == 0)) {
+		open LOCAL, "$directory/$filename";
+		binmode LOCAL, ":utf8";
+		read LOCAL, my $local_content, 10000000;
+		close LOCAL;
+		#print "$local_content\n\n";
+		#print "$content\n\n";
+		
+		if ($note->{content} eq $local_content) {
+			$newNotes{$key}{modify} = $note->{modify};
+			$newNotes{$key}{create} = $note->{create};
+			$newNotes{$key}{file} = $filename;
+			$newNotes{$key}{title} = $note->{title};
+
+			logIt( "\t$filename already downloaded.", 1);
+			return "$filename";
+			
+		}
+		
 		# A file already exists with that name, and we're not intentionally
 		#	replacing with a new copy.
 		logIt( "\t$filename already exists. Will not download.", 1);
-
+		
 		return "";
 	} else {
 		if ($allow_local_updates) {
 			open (FILE, '>', "$directory/$filename");
-			print FILE $content;
+			print FILE $note->{content};
 			close FILE;
 
 			if ($store_base_text) {
 				# Put a copy in storage
 				open (FILE, '>', "$storage_directory/$filename");
-				print FILE $content;
+				print FILE $note->{content};
 				close FILE;
 			}
 
 			# Set created and modified time
 			# Not sure why this has to be done twice, but it seems to on Mac OS X
-			utime $create, $create, "$directory/$filename";
-			utime $create, $modify, "$directory/$filename";
+			utime $note->{create}, $note->{modify}, "$directory/$filename";
+			utime $note->{create}, $note->{modify}, "$directory/$filename";
 
-			$newNotes{$key}{modify} = $modifyString;
-			$newNotes{$key}{create} = $createString;
+			$newNotes{$key}{modify} = $note->{modify};
+			$newNotes{$key}{create} = $note->{create};
 			$newNotes{$key}{file} = $filename;
-			$newNotes{$key}{title} = $title;
+			$newNotes{$key}{title} = $note->{title};
 
 			# Add this note to the sync'ed list for writing to database
 			return $filename;
@@ -460,14 +623,23 @@ sub trimTitle {
 }
 
 
+sub apiDeleteNote {
+	# Delete specified note from Simplenote server
+	my $token = shift;
+	my $key = shift;
+
+	logIt( "Network: delete note \"$key\"" ) if $flag_network_traffic;
+	my $response = $ua->get($url . "delete?key=$key&auth=${$token}{token}&email=${$token}{email}");
+	return $response->content;
+}
+
+
 sub deleteNoteOnline {
 	# Delete specified note from Simplenote server
 	my $key = shift;
 
 	if ($allow_server_updates) {
-		logIt( "Network: delete note \"$key\"" ) if $flag_network_traffic;
-		my $response = $ua->get($url . "delete?key=$key&auth=$token&email=${$config}{email}");
-		return $response->content;
+		return apiDeleteNote( $token, $key );
 	} else {
 		return "";
 	}
@@ -501,7 +673,7 @@ sub synchronizeNotesToFolder {
 	}
 
 	# get list of existing notes from server with mod date and delete status
-	my $note_ref = getNoteIndex();
+	my $note_ref = apiGetNoteIndex($token);
 	my %note = %$note_ref;
 
 	# get list of existing local text files with mod/creation date
@@ -730,7 +902,7 @@ sub writeSyncDatabase{
 	}
 
 	foreach my $record (sort keys %syncNotes) {
-		print DB "key: $record\n";
+		#print DB "key: $record\n";
 		for my $key (sort keys %{$syncNotes{$record}}) {
 			print DB "$key: ${$syncNotes{$record}}{$key}\n";
 		}
@@ -739,6 +911,7 @@ sub writeSyncDatabase{
 
 
 	close DB;
+
 	# remove simplenotesyncdb without the leading dot
 	if (-f "$directory/simplenotesync.db") {
 		unlink "$directory/simplenotesync.db";
